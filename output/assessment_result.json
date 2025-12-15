@@ -1,0 +1,21 @@
+{
+    "multi_dimensional_metrics": {
+        "predicted_quality": 5.02,
+        "quality_percentile": 47.14620797498045,
+        "expected_quality_range": "[5.41, 5.84]",
+        "maturity_index": 37.77700027870342,
+        "maturity_status": "Developing",
+        "risk_percentage": 65.33483569494462,
+        "risk_severity": "High",
+        "stability_score": 70.51853294337333,
+        "stability_interpretation": "Stable"
+    },
+    "chemical_property_recommendations": {
+        "alcohol": "Adjust alcohol from 9.40 to optimize. Current value is near low-quality mean (9.93). Consider moving towards high-quality range.",
+        "sulphates": "Consider adjusting sulphates. Current: 0.56. Low-quality range: Mean=0.62, Std=0.18.",
+        "volatile acidity": "Consider adjusting volatile acidity. Current: 0.70. Low-quality range: Mean=0.59, Std=0.18.",
+        "total sulfur dioxide": "Consider adjusting total sulfur dioxide. Current: 34.00. Low-quality range: Mean=54.65, Std=36.72.",
+        "chlorides": "Consider adjusting chlorides. Current: 0.08. Low-quality range: Mean=0.09, Std=0.06."
+    },
+    "overall_decision": "Poor Quality, High Risk: Significant issues detected. Not recommended for consumption or requires extensive intervention."
+}
