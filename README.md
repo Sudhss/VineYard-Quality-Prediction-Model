@@ -31,25 +31,31 @@ A machine learning system for predicting wine quality and providing actionable i
 
 ## Usage
 
-### 1. Data Preparation
+### 1. Install Dependencies
+First, install the required dependencies:
+```bash
+pip install -r requirements.txt
+```
+
+### 2. Data Preparation
 Run the data loader to download and prepare the dataset:
 ```bash
 python -m src.data_loader
 ```
 
-### 2. Model Training
+### 3. Model Training
 Train the model and generate artifacts:
 ```bash
 python -m src.model_engine
 ```
 
-### 3. Run Assessment
-Run the main script to perform a wine quality assessment:
+### 4. Run the Web Interface
+Start the Streamlit web application:
 ```bash
-python main.py
+streamlit run app.py
 ```
 
-The results will be saved to `output/assessment_result.json`.
+Then open your web browser to the URL shown in the terminal (usually http://localhost:8501) to access the interactive interface.
 
 ## Project Structure
 
