@@ -47,7 +47,7 @@ def interpret_quality(score_percent):
 # ------------------------------------------------------------
 # Header
 # ------------------------------------------------------------
-st.title("🍇 Vineyard Quality Assessment System")
+st.title("🍇 Vineyard Quality Assessment System🍇")
 st.caption("ML-powered vineyard quality prediction and decision intelligence")
 
 # ============================================================
