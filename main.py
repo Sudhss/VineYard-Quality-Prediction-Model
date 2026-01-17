@@ -1,3 +1,4 @@
+import sys
 import json
 import joblib
 import pandas as pd
@@ -5,53 +6,36 @@ import os
 
 from src.assessment_engine import full_wine_assessment
 
-# ------------------------------------
-# Load model + artifacts
-# ------------------------------------
-model = joblib.load("model/random_forest_model.joblib")
-artifacts = joblib.load("model/artifacts.joblib")
+def print_usage():
+    print("""
+Vineyard Quality Assessment System
+---------------------------------
 
-# ------------------------------------
-# Example user input (later comes from React)
-# ------------------------------------
+This project provides a web interface for wine quality prediction.
 
-user_input = {
-    "fixed acidity": 7.4,
-    "volatile acidity": 0.70,
-    "citric acid": 0.00,
-    "residual sugar": 1.9,
-    "chlorides": 0.076,
-    "free sulfur dioxide": 11.0,
-    "total sulfur dioxide": 34.0,
-    "density": 0.9978,
-    "pH": 3.51,
-    "sulphates": 0.56,
-    "alcohol": 9.4
-}
+To use the web interface, run:
+    streamlit run app.py
 
-input_features = pd.Series(user_input)
+This will start a local web server where you can input wine parameters
+and get quality predictions interactively.
 
-# ------------------------------------
-# Run assessment
-# ------------------------------------
-result = full_wine_assessment(
-    model=model,
-    input_features=input_features,
-    high_quality_stats=artifacts["high_quality_stats"],
-    low_quality_benchmarks=artifacts["low_quality_benchmarks"],
-    historical_quality_scores=artifacts["historical_quality_scores"],
-    mean_y_train=artifacts["mean_y_train"],
-    std_dev_residuals=artifacts["std_dev_residuals"],
-    perturbation_percentage=0.05,
-    sorted_importance_df=artifacts["sorted_importance_df"]
-)
+For development or direct API usage, you can use the assessment functions
+in src/assessment_engine.py directly.
+    """)
 
-# ------------------------------------
-# WRITE JSON TO FILE  
-# ------------------------------------
-os.makedirs("output", exist_ok=True)
+def main():
+    if len(sys.argv) > 1 and sys.argv[1] == '--help':
+        print_usage()
+        return
 
-with open("output/assessment_result.json", "w") as f:
-    json.dump(result, f, indent=4)
+    print("=" * 60)
+    print("Vineyard Quality Assessment System")
+    print("=" * 60)
+    print("\nThis project is designed to be used through the web interface.")
+    print("\nTo start the web interface, run:")
+    print("    streamlit run app.py")
+    print("\nFor more options, run:")
+    print("    python main.py --help")
 
-print("JSON generated at output/assessment_result.json")
+if __name__ == "__main__":
+    main()
