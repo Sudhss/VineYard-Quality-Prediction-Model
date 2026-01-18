@@ -57,6 +57,8 @@ streamlit run app.py
 
 Then open your web browser to the URL shown in the terminal (usually http://localhost:8501) to access the interactive interface.
 1. Enter the values recieved from the test results of the vineyard
+2. Click Test
+3. You will get a detailed map of the entire quality
 
 ## Project Structure
 
