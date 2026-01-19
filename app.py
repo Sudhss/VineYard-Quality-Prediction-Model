@@ -136,8 +136,6 @@ else:
             st.write(f"**Yield Insight:** {yield_msg}")
 
 
-
-
     st.progress(min(quality_percent / 100, 1.0))
     st.divider()
 
@@ -152,6 +150,64 @@ else:
     m3.metric("Risk Severity", metrics["risk_severity"])
     m4.metric("Stability", metrics["stability_interpretation"])
 
+    st.divider()
+
+    # --------------------------------------------------------
+    # RISK ASSESSMENT
+    # --------------------------------------------------------
+    st.subheader("Risk Assessment")
+    
+    risk_col1, risk_col2 = st.columns(2)
+    
+    with risk_col1:
+        st.metric("Risk of Quality Degradation", f"{metrics['risk_percentage']:.1f}%")
+    
+    with risk_col2:
+        st.metric("Stability Score", f"{metrics['stability_score']:.1f}%")
+    
+    # --------------------------------------------------------
+    # GENERATE REPORT
+    # --------------------------------------------------------
+    st.divider()
+    st.subheader("Download Report")
+    
+    # Format the report
+    report = f"""VINEYARD QUALITY ASSESSMENT REPORT
+{'='*80}
+
+OVERALL QUALITY
+{'='*80}
+Quality Score: {quality_percent:.1f}% - {label}
+Yield Insight: {yield_msg}
+
+ASSESSMENT METRICS
+{'='*80}
+Predicted Quality: {metrics['predicted_quality']:.2f}
+Quality Percentile: {metrics['quality_percentile']:.1f}% 
+Risk of Quality Degradation: {metrics['risk_percentage']:.1f}%
+Stability Score: {metrics['stability_score']:.1f}% 
+
+CHEMICAL PROPERTIES
+{'='*80}"""
+    
+    # Add chemical properties
+    for feature, value in st.session_state.user_input.items():
+        report += f"\n{feature.title()}: {value}"
+    
+    # Add recommendations if available
+    if 'recommendations' in result and result['recommendations']:
+        report += "\n\nRECOMMENDATIONS\n" + "="*80
+        for rec in result['recommendations']:
+            report += f"\n- {rec}"
+    
+    # Create download button
+    st.download_button(
+        label="Download Full Report",
+        data=report,
+        file_name=f"vineyard_quality_report_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.txt",
+        mime="text/plain"
+    )
+    
     st.divider()
 
     # --------------------------------------------------------
