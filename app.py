@@ -54,9 +54,73 @@ st.caption("ML-powered vineyard quality prediction and decision intelligence")
 # INPUT VIEW
 # ============================================================
 if not st.session_state.show_results:
-
-    st.subheader("Enter Vineyard Chemical Properties")
-
+    
+    st.subheader("Upload or Enter Vineyard Data")
+    
+    # Add file uploader
+    uploaded_file = st.file_uploader("Or upload a CSV file", type='csv')
+    
+    if uploaded_file is not None:
+        try:
+            # Read the CSV file
+            df = pd.read_csv(uploaded_file)
+            
+            # Check if all required columns are present
+            required_columns = [
+                'fixed acidity', 'volatile acidity', 'citric acid',
+                'residual sugar', 'chlorides', 'free sulfur dioxide',
+                'total sulfur dioxide', 'density', 'pH', 'sulphates', 'alcohol'
+            ]
+            
+            if all(col in df.columns for col in required_columns):
+                # Process each row in the uploaded file
+                results = []
+                for _, row in df.iterrows():
+                    result = full_wine_assessment(
+                        model=model,
+                        input_features=row[required_columns],
+                        high_quality_stats=artifacts["high_quality_stats"],
+                        low_quality_benchmarks=artifacts["low_quality_benchmarks"],
+                        historical_quality_scores=artifacts["historical_quality_scores"],
+                        mean_y_train=artifacts["mean_y_train"],
+                        std_dev_residuals=artifacts["std_dev_residuals"],
+                        perturbation_percentage=0.05,
+                        sorted_importance_df=artifacts["sorted_importance_df"]
+                    )
+                    results.append({
+                        **row.to_dict(),
+                        'predicted_quality': result['multi_dimensional_metrics']['predicted_quality'],
+                        'quality_percentile': result['multi_dimensional_metrics']['quality_percentile'],
+                        'risk_percentage': result['multi_dimensional_metrics']['risk_percentage'],
+                        'maturity_status': result['multi_dimensional_metrics']['maturity_status']
+                    })
+                
+                # Convert results to DataFrame
+                results_df = pd.DataFrame(results)
+                
+                # Display results
+                st.subheader("Batch Processing Results")
+                st.dataframe(results_df)
+                
+                # Download results as CSV
+                csv = results_df.to_csv(index=False)
+                st.download_button(
+                    label="Download Results as CSV",
+                    data=csv,
+                    file_name="batch_quality_assessment_results.csv",
+                    mime="text/csv"
+                )
+                
+                st.success("Batch processing completed!")
+                
+            else:
+                st.error(f"CSV file must contain these columns: {', '.join(required_columns)}")
+                
+        except Exception as e:
+            st.error(f"Error processing file: {str(e)}")
+    
+    st.subheader("Or Enter Vineyard Chemical Properties Manually")
+    
     col1, col2, col3 = st.columns(3)
 
     with col1:
@@ -76,22 +140,50 @@ if not st.session_state.show_results:
         sulphates = st.number_input("Sulphates", 0.3, 2.0, 0.56)
         alcohol = st.number_input("Alcohol (%)", 8.0, 15.0, 9.4)
 
-    if st.button("Analyze Vineyard"):
-        st.session_state.user_input = {
-            "fixed acidity": fixed_acidity,
-            "volatile acidity": volatile_acidity,
-            "citric acid": citric_acid,
-            "residual sugar": residual_sugar,
-            "chlorides": chlorides,
-            "free sulfur dioxide": free_so2,
-            "total sulfur dioxide": total_so2,
-            "density": density,
-            "pH": pH,
-            "sulphates": sulphates,
-            "alcohol": alcohol
+    # Create a centered, larger button with custom styling
+    st.markdown("""
+    <style>
+        .big-button {
+            display: flex;
+            justify-content: center;
+            margin: 25px 0;
         }
-        st.session_state.show_results = True
-        st.rerun()
+        .big-button button[data-testid="baseButton-primary"] {
+            padding: 12px 30px !important;
+            font-size: 18px !important;
+            font-weight: bold !important;
+            background-color: #9c7cff !important;
+            color: white !important;
+            border: none !important;
+            border-radius: 5px !important;
+            cursor: pointer !important;
+            transition: background-color 0.3s !important;
+        }
+        .big-button button[data-testid="baseButton-primary"]:hover {
+            background-color: #8a6dff !important;
+        }
+    </style>
+    """, unsafe_allow_html=True)
+    
+    # Button with custom styling
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        if st.button("Analyze Vineyard", use_container_width=True, type="primary"):
+            st.session_state.user_input = {
+                "fixed acidity": fixed_acidity,
+                "volatile acidity": volatile_acidity,
+                "citric acid": citric_acid,
+                "residual sugar": residual_sugar,
+                "chlorides": chlorides,
+                "free sulfur dioxide": free_so2,
+                "total sulfur dioxide": total_so2,
+                "density": density,
+                "pH": pH,
+                "sulphates": sulphates,
+                "alcohol": alcohol
+            }
+            st.session_state.show_results = True
+            st.rerun()
 
 # ============================================================
 # RESULTS VIEW
