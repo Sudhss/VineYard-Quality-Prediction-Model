@@ -89,6 +89,8 @@ The model provides the following performance metrics:
 - Mean Absolute Error (MAE): ~0.45
 - R² Score: ~0.45
 
+[Note that these are just example values, may be different for everyone]
+
 ## Output Format
 
 The assessment result includes:
