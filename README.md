@@ -9,6 +9,7 @@ A machine learning system for predicting wine quality and providing actionable i
 - **Risk Analysis**: Identifies potential quality degradation risks
 - **Production-ready**: Structured JSON output for easy integration with web applications
 - **Explainable AI**: Provides feature importance and reasoning behind predictions
+- **Clean UI**
 
 ## Installation
 
