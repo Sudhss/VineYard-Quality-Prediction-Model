@@ -120,8 +120,7 @@ Example output (simplified):
 Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## Author
-
-
+[Sudhanshu Shukla (@Sudhss)](https://github.com/Sudhss)
 
 ## Resources
 
