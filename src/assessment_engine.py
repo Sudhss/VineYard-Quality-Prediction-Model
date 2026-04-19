@@ -1,75 +1,135 @@
+"""
+assessment_engine.py
+--------------------
+Core inference and analytics engine.
+Accepts raw vineyard chemical properties, runs the XGBoost model,
+and computes the full assessment suite: quality score, percentile,
+maturity, risk, stability, recommendations, and feature importance.
+"""
+
+import logging
 import numpy as np
 from scipy import stats
 
-# ------------------------------------------------------------------------------------------------------------------------------------------------
-# calculate_quality_percentile
-# ------------------------------------------------------------------------------------------------------------------------------------------------
-def calculate_quality_percentile(predicted_quality, historical_quality_scores):
-    historical_quality_scores = np.array(historical_quality_scores).flatten()
-    if predicted_quality < historical_quality_scores.min():
-        return 0.0
-    elif predicted_quality > historical_quality_scores.max():
-        return 100.0
+logger = logging.getLogger(__name__)
+
+# Thresholds derived from domain knowledge and dataset statistics
+QUALITY_SCALE_MIN = 3.0
+QUALITY_SCALE_MAX = 9.0
+
+# Optimal ranges per feature (based on domain enology knowledge)
+OPTIMAL_RANGES = {
+    "fixed acidity":        (6.0, 9.0),
+    "volatile acidity":     (0.2, 0.5),
+    "citric acid":          (0.25, 0.5),
+    "residual sugar":       (1.0, 5.0),
+    "chlorides":            (0.03, 0.08),
+    "free sulfur dioxide":  (15.0, 40.0),
+    "total sulfur dioxide": (30.0, 120.0),
+    "density":              (0.990, 0.999),
+    "pH":                   (3.1, 3.5),
+    "sulphates":            (0.4, 0.8),
+    "alcohol":              (10.0, 13.0),
+}
+
+FEATURE_NAMES = [
+    "fixed acidity",
+    "volatile acidity",
+    "citric acid",
+    "residual sugar",
+    "chlorides",
+    "free sulfur dioxide",
+    "total sulfur dioxide",
+    "density",
+    "pH",
+    "sulphates",
+    "alcohol",
+]
+
+
+def _normalize_quality_score(predicted: float) -> float:
+    """
+    Map predicted quality (3–9 scale) to a 0–100 percentage score.
+    """
+    clamped = max(QUALITY_SCALE_MIN, min(QUALITY_SCALE_MAX, predicted))
+    score = (clamped - QUALITY_SCALE_MIN) / (QUALITY_SCALE_MAX - QUALITY_SCALE_MIN) * 100
+    return round(score, 2)
+
+
+def _compute_percentile(predicted_quality: float, quality_array: np.ndarray) -> float:
+    """
+    Compute what percentile the predicted quality sits at
+    within the training dataset distribution.
+    """
+    percentile = stats.percentileofscore(quality_array, predicted_quality, kind="rank")
+    return round(percentile, 2)
+
+
+def _assess_maturity(features: dict) -> tuple:
+    """
+    Determine vineyard maturity based on chemical indicators:
+    - Alcohol (primary driver of ripeness)
+    - pH (rises as grapes ripen)
+    - Fixed acidity (drops as grapes ripen)
+    Returns (maturity_index: float, maturity_status: str).
+    """
+    alcohol = features.get("alcohol", 10.0)
+    ph = features.get("pH", 3.2)
+    fixed_acidity = features.get("fixed acidity", 7.0)
+
+    # Normalized ripeness sub-scores (0–1 each)
+    alcohol_score = np.clip((alcohol - 8.0) / (14.0 - 8.0), 0, 1)
+    ph_score = np.clip((ph - 2.8) / (3.8 - 2.8), 0, 1)
+    acidity_score = np.clip(1.0 - (fixed_acidity - 4.0) / (14.0 - 4.0), 0, 1)
+
+    maturity_index = round((alcohol_score * 0.5 + ph_score * 0.25 + acidity_score * 0.25) * 100, 2)
+
+    if maturity_index < 35:
+        status = "Under-Mature"
+    elif maturity_index < 65:
+        status = "Developing"
+    elif maturity_index < 85:
+        status = "Peak Maturity"
     else:
-        return stats.percentileofscore(historical_quality_scores, predicted_quality, kind='rank')
+        status = "Over-Mature"
 
-# ------------------------------------------------------------------------------------------------------------------------------------------------
-# calculate_maturity_index
-# ------------------------------------------------------------------------------------------------------------------------------------------------
-def calculate_maturity_index(input_features, high_quality_stats):
-    input_alcohol = input_features['alcohol']
-    input_pH = input_features['pH']
-    input_residual_sugar = input_features['residual sugar']
-
-    hq_mean_alcohol = high_quality_stats.loc['mean', 'alcohol']
-    hq_std_alcohol = high_quality_stats.loc['std', 'alcohol']
-    hq_mean_pH = high_quality_stats.loc['mean', 'pH']
-    hq_std_pH = high_quality_stats.loc['std', 'pH']
-    hq_mean_rs = high_quality_stats.loc['mean', 'residual sugar']
-    hq_std_rs = high_quality_stats.loc['std', 'residual sugar']
-
-    alcohol_score = max(0, 1 - abs(input_alcohol - hq_mean_alcohol) / (hq_std_alcohol * 2))
-    pH_score = max(0, 1 - abs(input_pH - hq_mean_pH) / (hq_std_pH * 2))
-    residual_sugar_score = max(0, 1 - abs(input_residual_sugar - hq_mean_rs) / (hq_std_rs * 2))
-
-    maturity_index = ((alcohol_score + pH_score + residual_sugar_score) / 3) * 100
-
-    maturity_status = "Developing"
-    if (input_alcohol < hq_mean_alcohol - 1.5 * hq_std_alcohol) and \
-       (input_residual_sugar > hq_mean_rs + 1.5 * hq_std_rs):
-        maturity_status = "Under-mature"
-    elif (input_alcohol > hq_mean_alcohol + 1.5 * hq_std_alcohol) and \
-         (input_pH > hq_mean_pH + 1.5 * hq_std_pH):
-        maturity_status = "Over-mature"
-    elif maturity_index >= 70:
-        maturity_status = "Peak Maturity"
-
-    return maturity_index, maturity_status
+    return maturity_index, status
 
 
-# ------------------------------------------------------------------------------------------------------------------------------------------------
-# calculate_risk_degradation_index
-# ------------------------------------------------------------------------------------------------------------------------------------------------
-def calculate_risk_degradation_index(input_features, low_quality_benchmarks):
-    risk_features = ['volatile acidity', 'chlorides', 'total sulfur dioxide', 'pH']
-    risk_scores = []
+def _compute_risk(features: dict, feature_importance: dict) -> tuple:
+    """
+    Compute risk score based on how far each feature deviates
+    from its optimal range, weighted by feature importance.
+    Returns (risk_percentage: float, risk_severity: str).
+    """
+    total_weight = 0.0
+    weighted_deviation = 0.0
 
-    for feature in risk_features:
-        input_value = input_features[feature]
-        lq_mean = low_quality_benchmarks.loc['mean', feature]
-        lq_std = low_quality_benchmarks.loc['std', feature]
+    for feature, (low, high) in OPTIMAL_RANGES.items():
+        value = features.get(feature, (low + high) / 2)
+        importance = feature_importance.get(feature, 1.0 / len(FEATURE_NAMES))
 
-        if lq_std == 0:
-            risk_score = 1.0 if input_value == lq_mean else 0.0
+        if value < low:
+            deviation = (low - value) / max(abs(low), 1e-6)
+        elif value > high:
+            deviation = (value - high) / max(abs(high), 1e-6)
         else:
-            risk_score = max(0, 1 - abs(input_value - lq_mean) / (lq_std * 2))
-        risk_scores.append(risk_score)
+            deviation = 0.0
 
-    risk_percentage = (sum(risk_scores) / len(risk_scores)) * 100
+        deviation = min(deviation, 2.0)  # Cap at 200% deviation
+        weighted_deviation += deviation * importance
+        total_weight += importance
+
+    if total_weight > 0:
+        raw_risk = weighted_deviation / total_weight
+    else:
+        raw_risk = 0.0
+
+    risk_percentage = round(min(raw_risk * 100, 100.0), 2)
 
     if risk_percentage < 30:
         severity = "Low"
-    elif 30 <= risk_percentage < 60:
+    elif risk_percentage < 60:
         severity = "Medium"
     else:
         severity = "High"
@@ -77,217 +137,121 @@ def calculate_risk_degradation_index(input_features, low_quality_benchmarks):
     return risk_percentage, severity
 
 
+def _assess_stability(features: dict, risk_percentage: float) -> str:
+    """
+    Determine chemical stability based on sulfur dioxide balance
+    and overall risk level.
+    Returns 'Stable' or 'Unstable'.
+    """
+    free_so2 = features.get("free sulfur dioxide", 30)
+    total_so2 = features.get("total sulfur dioxide", 80)
+    volatile_acidity = features.get("volatile acidity", 0.4)
 
-# ------------------------------------------------------------------------------------------------------------------------------------------------
-# calculate_stability_score
-# ------------------------------------------------------------------------------------------------------------------------------------------------
-def calculate_stability_score(model, input_features, perturbation_percentage):
-    perturbed_predictions = []
+    # Sulfur dioxide ratio (below ~0.7 suggests poor preservation balance)
+    so2_ratio = free_so2 / max(total_so2, 1.0)
+    so2_ok = 0.15 <= so2_ratio <= 0.75
 
-    original_prediction = model.predict(input_features.to_frame().T)[0]
-    perturbed_predictions.append(original_prediction)
+    va_ok = volatile_acidity <= 0.7
 
-    for feature_name in input_features.index:
-        original_value = input_features[feature_name]
-
-        perturbed_features_increase = input_features.copy()
-        perturbed_features_increase[feature_name] = original_value * (1 + perturbation_percentage)
-        pred_increase = model.predict(perturbed_features_increase.to_frame().T)[0]
-        perturbed_predictions.append(pred_increase)
-
-        perturbed_features_decrease = input_features.copy()
-        perturbed_features_decrease[feature_name] = original_value * (1 - perturbation_percentage)
-        pred_decrease = model.predict(perturbed_features_decrease.to_frame().T)[0]
-        perturbed_predictions.append(pred_decrease)
-
-    perturbed_predictions_array = np.array(perturbed_predictions)
-
-    std_dev_predictions = np.std(perturbed_predictions_array)
-
-    stability_score = max(0, 100 - (std_dev_predictions / 0.5) * 100)
-
-    if stability_score >= 70:
-        stability_interpretation = "Stable"
-    else:
-        stability_interpretation = "Sensitive"
-
-    return stability_score, stability_interpretation
+    if so2_ok and va_ok and risk_percentage < 65:
+        return "Stable"
+    return "Unstable"
 
 
-# ------------------------------------------------------------------------------------------------------------------------------------------------
-# recommend_chemical_properties
-# ------------------------------------------------------------------------------------------------------------------------------------------------
-def recommend_chemical_properties(
-    input_features,
-    predicted_quality,
-    high_quality_stats,
-    low_quality_benchmarks,
-    sorted_importance_df
-):
-    recommendations = {}
-    top_features = sorted_importance_df.index[:5]
+def _generate_recommendations(features: dict, feature_importance: dict) -> list:
+    """
+    Generate actionable recommendations by identifying the top deviating
+    features weighted by their model importance.
+    Returns a list of recommendation strings (up to 5).
+    """
+    deviations = []
 
-    for feature in top_features:
-        input_value = input_features[feature]
+    for feature, (low, high) in OPTIMAL_RANGES.items():
+        value = features.get(feature)
+        if value is None:
+            continue
 
-        hq_mean = high_quality_stats.loc['mean', feature] if feature in high_quality_stats.columns else None
-        hq_std = high_quality_stats.loc['std', feature] if feature in high_quality_stats.columns else None
+        importance = feature_importance.get(feature, 0.0)
 
-        lq_mean = low_quality_benchmarks.loc['mean', feature] if feature in low_quality_benchmarks.columns else None
-        lq_std = low_quality_benchmarks.loc['std', feature] if feature in low_quality_benchmarks.columns else None
-
-        if hq_mean is not None and lq_mean is not None:
-            if predicted_quality < 5.5:
-                if input_value > lq_mean + lq_std:
-                    recommendations[feature] = f"Reduce {feature} from {input_value:.2f} to move away from low-quality characteristics (low-quality mean: {lq_mean:.2f})."
-                elif input_value < lq_mean - lq_std:
-                    recommendations[feature] = f"Increase {feature} from {input_value:.2f} to move away from low-quality characteristics (low-quality mean: {lq_mean:.2f})."
-                else:
-                    recommendations[feature] = f"Adjust {feature} from {input_value:.2f} to optimize. Current value is near low-quality mean ({lq_mean:.2f}). Consider moving towards high-quality range."
-            else:
-                if input_value > hq_mean + hq_std:
-                    recommendations[feature] = f"Reduce {feature} from {input_value:.2f} to align with high-quality characteristics (high-quality mean: {hq_mean:.2f})."
-                elif input_value < hq_mean - hq_std:
-                    recommendations[feature] = f"Increase {feature} from {input_value:.2f} to align with high-quality characteristics (high-quality mean: {hq_mean:.2f})."
-                else:
-                    recommendations[feature] = f"Maintain current {feature} at {input_value:.2f}. It is within an optimal range for high-quality wines (high-quality mean: {hq_mean:.2f})."
-        elif hq_mean is not None:
-            recommendations[feature] = f"Optimal range based on high-quality wines: Mean={hq_mean:.2f}, Std={hq_std:.2f}. Current: {input_value:.2f}."
-        elif lq_mean is not None:
-            recommendations[feature] = f"Consider adjusting {feature}. Current: {input_value:.2f}. Low-quality range: Mean={lq_mean:.2f}, Std={lq_std:.2f}."
+        if value < low:
+            direction = "Increase"
+            magnitude = low - value
+        elif value > high:
+            direction = "Reduce"
+            magnitude = value - high
         else:
-            recommendations[feature] = f"No specific benchmark for {feature} available for recommendation."
+            continue
+
+        deviations.append((importance * magnitude, direction, feature, value, low, high))
+
+    # Sort by weighted severity, descending
+    deviations.sort(reverse=True)
+
+    recommendations = []
+    for _, direction, feature, value, low, high in deviations[:5]:
+        if direction == "Increase":
+            rec = f"{direction} {feature} from {value:.2f} toward optimal range [{low:.2f} – {high:.2f}]"
+        else:
+            rec = f"{direction} {feature} from {value:.2f} toward optimal range [{low:.2f} – {high:.2f}]"
+        recommendations.append(rec)
+
+    if not recommendations:
+        recommendations.append("Chemical profile is within optimal ranges — no major adjustments required.")
 
     return recommendations
 
-# ------------------------------------------------------------------------------------------------------------------------------------------------
-# make_overall_decision
-# ------------------------------------------------------------------------------------------------------------------------------------------------
 
-def make_overall_decision(assessment_results):
-    predicted_quality = assessment_results['predicted_quality']
-    maturity_status = assessment_results['maturity_status']
-    risk_severity = assessment_results['risk_severity']
-    stability_interpretation = assessment_results['stability_interpretation']
-
-    decision = ""
-
-    if predicted_quality >= 7.0:
-        if maturity_status == "Peak Maturity" and risk_severity == "Low" and stability_interpretation == "Stable":
-            decision = "Excellent Quality: Ready for consumption or premium aging. Optimal balance and stability."
-        elif maturity_status == "Developing" and risk_severity == "Low":
-            decision = "High Potential: Further aging recommended to reach peak maturity. Low risk and good stability."
-        else:
-            decision = "Good Quality: Consider specific handling based on maturity, risk, or stability factors. Further analysis needed."
-    elif predicted_quality >= 5.5:
-        if risk_severity == "High" or stability_interpretation == "Sensitive":
-            decision = "Moderate Quality with Concerns: Address high risk factors or improve stability. Not ideal for long-term aging."
-        elif maturity_status == "Under-mature":
-            decision = "Moderate Quality, Under-mature: Needs more time for development, or consider specific treatments to enhance maturity."
-        else:
-            decision = "Solid Mid-Range Quality: Suitable for general consumption. No immediate concerns but lacks premium characteristics."
-    else:
-        if risk_severity == "High":
-            decision = "Poor Quality, High Risk: Significant issues detected. Not recommended for consumption or requires extensive intervention."
-        elif maturity_status == "Over-mature":
-            decision = "Poor Quality, Over-mature: Past its prime, likely degraded. Consider alternative uses or discard."
-        else:
-            decision = "Improvement Recommended: The current quality is below optimal. Implement immediate interventions to improve chemical balance, or consider alternative uses."
-
-    return decision
-
-
-# ------------------------------------------------------------------------------------------------------------------------------------------------
-# get_multi_dimensional_assessment
-# ------------------------------------------------------------------------------------------------------------------------------------------------
-def get_multi_dimensional_assessment(
+def run_assessment(
+    features: dict,
     model,
-    input_features,
-    high_quality_stats,
-    low_quality_benchmarks,
-    historical_quality_scores,
-    mean_y_train,
-    std_dev_residuals,
-    perturbation_percentage
-):
-    input_df = input_features.to_frame().T
+    quality_array: list,
+    feature_importance: dict,
+) -> dict:
+    """
+    Full assessment pipeline.
 
-    predicted_quality = model.predict(input_df)[0]
+    Args:
+        features         : dict of feature_name → float value
+        model            : trained XGBRegressor
+        quality_array    : array of quality scores from training data
+        feature_importance: dict of feature_name → importance score
 
-    quality_percentile = calculate_quality_percentile(predicted_quality, historical_quality_scores)
+    Returns:
+        Full assessment result dict matching the output specification.
+    """
+    # Build input vector in correct feature order
+    input_vector = np.array([[features[f] for f in FEATURE_NAMES]], dtype=np.float64)
 
-    lower_bound_expected_quality = mean_y_train - std_dev_residuals
-    upper_bound_expected_quality = mean_y_train + std_dev_residuals
-    expected_quality_range = f"[{lower_bound_expected_quality:.2f}, {upper_bound_expected_quality:.2f}]"
+    # Predict directly without scaling
+    predicted_quality = float(model.predict(input_vector)[0])
+    predicted_quality = round(max(QUALITY_SCALE_MIN, min(QUALITY_SCALE_MAX, predicted_quality)), 4)
 
-    maturity_index, maturity_status = calculate_maturity_index(
-        input_features[['alcohol', 'pH', 'residual sugar']],
-        high_quality_stats
-    )
+    quality_score_pct = _normalize_quality_score(predicted_quality)
+    quality_percentile = _compute_percentile(predicted_quality, quality_array)
+    maturity_index, maturity_status = _assess_maturity(features)
+    risk_percentage, risk_severity = _compute_risk(features, feature_importance)
+    stability = _assess_stability(features, risk_percentage)
+    recommendations = _generate_recommendations(features, feature_importance)
 
-    risk_percentage, risk_severity = calculate_risk_degradation_index(
-        input_features[['volatile acidity', 'chlorides', 'total sulfur dioxide', 'pH']],
-        low_quality_benchmarks
-    )
-
-    stability_score, stability_interpretation = calculate_stability_score(
-        model, input_features, perturbation_percentage
-    )
-
-    assessment_results = {
-        'predicted_quality': float(predicted_quality),
-        'quality_percentile': float(quality_percentile),
-        'expected_quality_range': expected_quality_range,
-        'maturity_index': float(maturity_index),
-        'maturity_status': maturity_status,
-        'risk_percentage': float(risk_percentage),
-        'risk_severity': risk_severity,
-        'stability_score': float(stability_score),
-        'stability_interpretation': stability_interpretation
+    result = {
+        "predicted_quality": round(predicted_quality, 4),
+        "quality_score_pct": quality_score_pct,
+        "quality_percentile": quality_percentile,
+        "maturity_index": maturity_index,
+        "maturity_status": maturity_status,
+        "risk_percentage": risk_percentage,
+        "risk_severity": risk_severity,
+        "stability": stability,
+        "recommendations": recommendations,
+        "feature_importance": feature_importance,
     }
 
-    return assessment_results
-
-
-# ------------------------------------------------------------------------------------------------------------------------------------------------
-# full_wine_assessment
-# ------------------------------------------------------------------------------------------------------------------------------------------------
-def full_wine_assessment(
-    model,
-    input_features,
-    high_quality_stats,
-    low_quality_benchmarks,
-    historical_quality_scores,
-    mean_y_train,
-    std_dev_residuals,
-    perturbation_percentage,
-    sorted_importance_df
-):
-    assessment_results = get_multi_dimensional_assessment(
-        model=model,
-        input_features=input_features,
-        high_quality_stats=high_quality_stats,
-        low_quality_benchmarks=low_quality_benchmarks,
-        historical_quality_scores=historical_quality_scores,
-        mean_y_train=mean_y_train,
-        std_dev_residuals=std_dev_residuals,
-        perturbation_percentage=perturbation_percentage
+    logger.info(
+        "Assessment complete — Quality: %.2f | Percentile: %.1f%% | Risk: %s | Stability: %s",
+        predicted_quality,
+        quality_percentile,
+        risk_severity,
+        stability,
     )
 
-    chemical_property_recommendations = recommend_chemical_properties(
-        input_features=input_features,
-        predicted_quality=assessment_results['predicted_quality'],
-        high_quality_stats=high_quality_stats,
-        low_quality_benchmarks=low_quality_benchmarks,
-        sorted_importance_df=sorted_importance_df
-    )
-
-    overall_decision = make_overall_decision(assessment_results)
-
-    final_assessment = {
-        'multi_dimensional_metrics': assessment_results,
-        'chemical_property_recommendations': chemical_property_recommendations,
-        'overall_decision': overall_decision
-    }
-
-    return final_assessment
+    return result

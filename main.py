@@ -1,41 +1,64 @@
+"""
+main.py
+-------
+Entry point for training the Vineyard Quality Assessment ML pipeline.
+Run this once before launching the Streamlit app.
+
+Usage:
+    python main.py
+"""
+
 import sys
-import json
-import joblib
-import pandas as pd
 import os
+import logging
 
-from src.assessment_engine import full_wine_assessment
+# Ensure src/ is on path
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
 
-def print_usage():
-    print("""
-Vineyard Quality Assessment System
----------------------------------
+from data_loader import get_splits
+from model_engine import (
+    train_model,
+    evaluate_model,
+    get_feature_importance,
+    save_artifacts,
+)
 
-This project provides a web interface for wine quality prediction.
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+)
+logger = logging.getLogger(__name__)
 
-To use the web interface, run:
-    streamlit run app.py
-
-This will start a local web server where you can input wine parameters
-and get quality predictions interactively.
-
-For development or direct API usage, you can use the assessment functions
-in src/assessment_engine.py directly.
-    """)
 
 def main():
-    if len(sys.argv) > 1 and sys.argv[1] == '--help':
-        print_usage()
-        return
+    logger.info("=" * 60)
+    logger.info("Vineyard Quality Assessment — Training Pipeline")
+    logger.info("=" * 60)
 
-    print("=" * 60)
-    print("Vineyard Quality Assessment System")
-    print("=" * 60)
-    print("\nThis project is designed to be used through the web interface.")
-    print("\nTo start the web interface, run:")
-    print("    streamlit run app.py")
-    print("\nFor more options, run:")
-    print("    python main.py --help")
+    # Step 1: Load and preprocess data
+    logger.info("Step 1/4 — Loading and preprocessing dataset...")
+    X_train, X_test, y_train, y_test, quality_array, scaler = get_splits(
+        csv_path="data/wine_quality.csv"
+    )
+
+    # Step 2: Train model with hyperparameter tuning
+    logger.info("Step 2/4 — Training XGBoost model with RandomizedSearchCV...")
+    model = train_model(X_train, y_train, n_iter=40, cv=5)
+
+    # Step 3: Evaluate
+    logger.info("Step 3/4 — Evaluating model performance...")
+    metrics = evaluate_model(model, X_test, y_test)
+    logger.info("Final Metrics → MAE: %.4f | RMSE: %.4f | R2: %.4f",
+                metrics["MAE"], metrics["RMSE"], metrics["R2"])
+
+    # Step 4: Save artifacts
+    logger.info("Step 4/4 — Saving model and artifacts...")
+    save_artifacts(model, scaler, quality_array, metrics)
+
+    logger.info("=" * 60)
+    logger.info("Training complete. Run: streamlit run app.py")
+    logger.info("=" * 60)
+
 
 if __name__ == "__main__":
     main()
