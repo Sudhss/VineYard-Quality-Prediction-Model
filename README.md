@@ -1,11 +1,16 @@
 # Vineyard Quality Assessment Model
 
+
 <div align="center">
   <img src="https://img.shields.io/badge/Python-3.9+-blue.svg" alt="Python">
   <img src="https://img.shields.io/badge/Streamlit-1.30+-red.svg" alt="Streamlit">
   <img src="https://img.shields.io/badge/Machine%20Learning-XGBoost-orange.svg" alt="XGBoost">
   <img src="https://img.shields.io/badge/Status-Completed-success.svg" alt="Status">
 </div>
+
+<br>
+
+![alt text](image.png)
 
 <br>
 
@@ -88,14 +93,11 @@ To prevent data leakage and bias, the dataset is normalized using `StandardScale
 
 ---
 
-## Team & Contributors
+## Author
 
 Developed as a Major/Mini Project in Artificial Intelligence & Machine Learning (AIML).
 
-* **Sudhanshu Shukla** (Group Leader) - *Roll No. 2301331530176*
-* **Sparsh Bhalla** - *Roll No. 2301331530173*
-* **Srijan Yadav** - *Roll No. 2301331530174*
-* **Sriom Kant** - *Roll No. 2301331530175*
+* **Sudhanshu Shukla** - *Roll No. 2301331530176*
 
 **Supervised by:** Mr. Ritesh Rajput (Professor, Dept. of AIML, NIET)
 
